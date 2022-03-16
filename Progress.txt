@@ -1,0 +1,54 @@
+# Download COCO val
+torch.hub.download_url_to_file('https://ultralytics.com/assets/coco2017val.zip', 'tmp.zip')
+!unzip -q tmp.zip -d ../datasets && rm tmp.zip
+
+# Run Validation on COCO 5000
+python val.py --weights yolov5x.pt --data coco.yaml --img 640 --iou 0.65 --half
+
+# Download COCO test-dev2017
+torch.hub.download_url_to_file('https://ultralytics.com/assets/coco2017labels.zip', 'tmp.zip')
+!unzip -q tmp.zip -d ../datasets && rm tmp.zip
+!f="test2017.zip" && curl http://images.cocodataset.org/zips/$f -o $f && unzip -q $f -d ../datasets/coco/images
+
+# Run YOLOv5x on COCO test
+python val.py --weights yolov5x.pt --data coco.yaml --img 640 --iou 0.65 --half --task test
+
+# Run YOLOv5x on COCO val
+python val.py --weights yolov5x.pt --data coco.yaml --img 640 --iou 0.65 --half
+
+# Train YOLOv5s on COCO 
+python path/to/train.py --data coco128.yaml --weights yolov5s.pt --img 640  # from pretrained (RECOMMENDED)
+python path/to/train.py --data coco128.yaml --weights '' --cfg yolov5s.yaml --img 640  # from scratch
+
+# VisDrone
+python train.py --img 640 --batch 16 --epochs 3 --data VisDrone.yaml --weights yolov5s.pt --cache # from pretrained 
+python train.py --data VisDrone.yaml --weights '' --cfg yolov5s.yaml --img 640  # from scratch
+python val.py --weights ./runs/train/exp/weights/best.pt --data VisDrone.yaml --img 640 --iou 0.65 --half
+python detect.py --weights ./runs/train/exp/weights/best.pt  --source  ../datasets/VisDrone/VisDrone2019-DET-test-challenge/images
+
+#New Drone (Aerial Maritime - v9 download on roboflow https://public.roboflow.ai/object-detection/aerial-maritime)
+python train.py --data ../datasets/Drone_New/Drone_New.yaml --weights '' --cfg yolov5s.yaml --img 640 
+python val.py --weights ./runs/train/exp/weights/best.pt --data ../datasets/Drone_New/Drone_New.yaml --img 640 --iou 0.65 --half --task test
+
+# SeaDroneSee Dataset
+https://cloud.cs.uni-tuebingen.de/index.php/s/pNqRDqtLjXbEqDm
+file datasets/SeaDroneSee/train/images/3.png  image dimensions
+1230 x 932 SeaDroneSee dimensions images ARE DIFFERENT !!!
+val 859 + train 2975 + test 1796
+
+python train.py --img 640 --batch 16 --epochs 200 --data ../datasets/SeaDroneSee/SeaDroneSee.yaml --weights yolov5s.pt --cache
+python detect.py --weights ./runs/train/exp/weights/best.pt  --source ../datasets/SeaDroneSee/test/images
+python train.py --data ../datasets/SeaDroneSee/SeaDroneSee.yaml --weights '' --cfg yolov5s.yaml --img 640  # from scratch
+python val.py --weights ./runs/train/exp/weights/best.pt --data ../datasets/SeaDroneSee/SeaDroneSee.yaml --img 640 --iou 0.65 --half
+
+#Inference 
+python detect.py --source 0  # webcam
+                          img.jpg  # image 
+                          vid.mp4  # video
+                          path/  # directory
+                          path/*.jpg  # glob
+                          'https://youtu.be/Zgi9g1ksQHc'  # YouTube
+                          'rtsp://example.com/media.mp4'  # RTSP, RTMP, HTTP stream
+
+
+

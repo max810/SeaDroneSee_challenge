@@ -1,0 +1,6 @@
+swimmer
+floater
+boat
+swimmer_on_boat
+floater_on_boat
+life_jacket

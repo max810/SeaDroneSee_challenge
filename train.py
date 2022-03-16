@@ -31,6 +31,8 @@ from torch.cuda import amp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import SGD, Adam, AdamW, lr_scheduler
 from tqdm import tqdm
+from omegaconf import DictConfig
+import hydra
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]  # YOLOv5 root directory
@@ -83,11 +85,11 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
     LOGGER.info(colorstr('hyperparameters: ') + ', '.join(f'{k}={v}' for k, v in hyp.items()))
 
     # Save run settings
-    if not evolve:
-        with open(save_dir / 'hyp.yaml', 'w') as f:
-            yaml.safe_dump(hyp, f, sort_keys=False)
-        with open(save_dir / 'opt.yaml', 'w') as f:
-            yaml.safe_dump(vars(opt), f, sort_keys=False)
+    # if not evolve:
+    #     with open(save_dir / 'hyp.yaml', 'w') as f:
+    #         yaml.safe_dump(hyp, f, sort_keys=False)
+    #     with open(save_dir / 'opt.yaml', 'w') as f:
+    #         yaml.safe_dump(vars(opt), f, sort_keys=False)
 
     # Loggers
     data_dict = None
@@ -131,12 +133,12 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         model = Model(cfg, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
 
     # Freeze
-    freeze = [f'model.{x}.' for x in (freeze if len(freeze) > 1 else range(freeze[0]))]  # layers to freeze
-    for k, v in model.named_parameters():
-        v.requires_grad = True  # train all layers
-        if any(x in k for x in freeze):
-            LOGGER.info(f'freezing {k}')
-            v.requires_grad = False
+    # freeze = [f'model.{x}.' for x in (freeze if len(freeze) > 1 else range(freeze[0]))]  # layers to freeze
+    # for k, v in model.named_parameters():
+    #     v.requires_grad = True  # train all layers
+    #     if any(x in k for x in freeze):
+    #         LOGGER.info(f'freezing {k}')
+    #         v.requires_grad = False
 
     # Image size
     gs = max(int(model.stride.max()), 32)  # grid size (max stride)
@@ -367,23 +369,25 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
             ema.update_attr(model, include=['yaml', 'nc', 'hyp', 'names', 'stride', 'class_weights'])
             final_epoch = (epoch + 1 == epochs) or stopper.possible_stop
             if not noval or final_epoch:  # Calculate mAP
-                results, maps, _ = val.run(data_dict,
-                                           batch_size=batch_size // WORLD_SIZE * 2,
-                                           imgsz=imgsz,
-                                           model=ema.ema,
-                                           single_cls=single_cls,
-                                           dataloader=val_loader,
-                                           save_dir=save_dir,
-                                           plots=False,
-                                           callbacks=callbacks,
-                                           compute_loss=compute_loss)
+                results, maps, _, metrics_dict = val.run(data_dict,
+                                                 batch_size=batch_size // WORLD_SIZE * 2,
+                                                 imgsz=imgsz,
+                                                 model=ema.ema,
+                                                 single_cls=single_cls,
+                                                 dataloader=val_loader,
+                                                 save_dir=save_dir,
+                                                 plots=False,
+                                                 callbacks=callbacks,
+                                                 compute_loss=compute_loss)
+                metrics_dict['train/box_loss'], metrics_dict['train/obj_loss'], metrics_dict['train/cls_loss'] = list(mloss)
+                metrics_dict['x/lr0'], metrics_dict['x/lr1'], metrics_dict['x/lr2'] = lr
 
             # Update best mAP
             fi = fitness(np.array(results).reshape(1, -1))  # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
             if fi > best_fitness:
                 best_fitness = fi
-            log_vals = list(mloss) + list(results) + lr
-            callbacks.run('on_fit_epoch_end', log_vals, epoch, best_fitness, fi)
+            # log_vals = list(mloss) + list(results) + lr
+            callbacks.run('on_fit_epoch_end', metrics_dict, epoch, best_fitness, fi)
 
             # Save model
             if (not nosave) or (final_epoch and not evolve):  # if save
@@ -428,21 +432,24 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                 strip_optimizer(f)  # strip optimizers
                 if f is best:
                     LOGGER.info(f'\nValidating {f}...')
-                    results, _, _ = val.run(data_dict,
-                                            batch_size=batch_size // WORLD_SIZE * 2,
-                                            imgsz=imgsz,
-                                            model=attempt_load(f, device).half(),
-                                            iou_thres=0.65 if is_coco else 0.60,  # best pycocotools results at 0.65
-                                            single_cls=single_cls,
-                                            dataloader=val_loader,
-                                            save_dir=save_dir,
-                                            save_json=is_coco,
-                                            verbose=True,
-                                            plots=True,
-                                            callbacks=callbacks,
-                                            compute_loss=compute_loss)  # val best model with plots
+                    results, _, _, metrics_dict = val.run(data_dict,
+                                                  batch_size=batch_size // WORLD_SIZE * 2,
+                                                  imgsz=imgsz,
+                                                  model=attempt_load(f, device).half(),
+                                                  iou_thres=0.65 if is_coco else 0.60,  # best pycocotools results at 0.65
+                                                  single_cls=single_cls,
+                                                  dataloader=val_loader,
+                                                  save_dir=save_dir,
+                                                  save_json=is_coco,
+                                                  verbose=True,
+                                                  plots=True,
+                                                  callbacks=callbacks,
+                                                  compute_loss=compute_loss)  # val best model with plots
+                    metrics_dict['train/box_loss'], metrics_dict['train/obj_loss'], metrics_dict['train/cls_loss'] = list(mloss)
+                    metrics_dict['x/lr0'], metrics_dict['x/lr1'], metrics_dict['x/lr2'] = lr
+                    
                     if is_coco:
-                        callbacks.run('on_fit_epoch_end', list(mloss) + list(results) + lr, epoch, best_fitness, fi)
+                        callbacks.run('on_fit_epoch_end', metrics_dict, epoch, best_fitness, fi)
 
         callbacks.run('on_train_end', last, best, plots, epoch, results)
         LOGGER.info(f"Results saved to {colorstr('bold', save_dir)}")
@@ -451,54 +458,55 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
     return results
 
 
-def parse_opt(known=False):
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', type=str, default=ROOT / 'yolov5s.pt', help='initial weights path')
-    parser.add_argument('--cfg', type=str, default='', help='model.yaml path')
-    parser.add_argument('--data', type=str, default=ROOT / 'data/coco128.yaml', help='dataset.yaml path')
-    parser.add_argument('--hyp', type=str, default=ROOT / 'data/hyps/hyp.scratch-low.yaml', help='hyperparameters path')
-    parser.add_argument('--epochs', type=int, default=300)
-    parser.add_argument('--batch-size', type=int, default=16, help='total batch size for all GPUs, -1 for autobatch')
-    parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=640, help='train, val image size (pixels)')
-    parser.add_argument('--rect', action='store_true', help='rectangular training')
-    parser.add_argument('--resume', nargs='?', const=True, default=False, help='resume most recent training')
-    parser.add_argument('--nosave', action='store_true', help='only save final checkpoint')
-    parser.add_argument('--noval', action='store_true', help='only validate final epoch')
-    parser.add_argument('--noautoanchor', action='store_true', help='disable AutoAnchor')
-    parser.add_argument('--evolve', type=int, nargs='?', const=300, help='evolve hyperparameters for x generations')
-    parser.add_argument('--bucket', type=str, default='', help='gsutil bucket')
-    parser.add_argument('--cache', type=str, nargs='?', const='ram', help='--cache images in "ram" (default) or "disk"')
-    parser.add_argument('--image-weights', action='store_true', help='use weighted image selection for training')
-    parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
-    parser.add_argument('--multi-scale', action='store_true', help='vary img-size +/- 50%%')
-    parser.add_argument('--single-cls', action='store_true', help='train multi-class data as single-class')
-    parser.add_argument('--optimizer', type=str, choices=['SGD', 'Adam', 'AdamW'], default='SGD', help='optimizer')
-    parser.add_argument('--sync-bn', action='store_true', help='use SyncBatchNorm, only available in DDP mode')
-    parser.add_argument('--workers', type=int, default=8, help='max dataloader workers (per RANK in DDP mode)')
-    parser.add_argument('--project', default=ROOT / 'runs/train', help='save to project/name')
-    parser.add_argument('--name', default='exp', help='save to project/name')
-    parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
-    parser.add_argument('--quad', action='store_true', help='quad dataloader')
-    parser.add_argument('--cos-lr', action='store_true', help='cosine LR scheduler')
-    parser.add_argument('--label-smoothing', type=float, default=0.0, help='Label smoothing epsilon')
-    parser.add_argument('--patience', type=int, default=100, help='EarlyStopping patience (epochs without improvement)')
-    parser.add_argument('--freeze', nargs='+', type=int, default=[0], help='Freeze layers: backbone=10, first3=0 1 2')
-    parser.add_argument('--save-period', type=int, default=-1, help='Save checkpoint every x epochs (disabled if < 1)')
-    parser.add_argument('--local_rank', type=int, default=-1, help='DDP parameter, do not modify')
+# def parse_opt(known=False):
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument('--weights', type=str, default=ROOT / 'yolov5s.pt', help='initial weights path')
+#     parser.add_argument('--cfg', type=str, default='', help='model.yaml path')
+#     parser.add_argument('--data', type=str, default=ROOT / 'data/coco128.yaml', help='dataset.yaml path')
+#     parser.add_argument('--hyp', type=str, default=ROOT / 'data/hyps/hyp.scratch-low.yaml', help='hyperparameters path')
+#     parser.add_argument('--epochs', type=int, default=300)
+#     parser.add_argument('--batch-size', type=int, default=16, help='total batch size for all GPUs, -1 for autobatch')
+#     parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=640, help='train, val image size (pixels)')
+#     parser.add_argument('--rect', action='store_true', help='rectangular training')
+#     parser.add_argument('--resume', nargs='?', const=True, default=False, help='resume most recent training')
+#     parser.add_argument('--nosave', action='store_true', help='only save final checkpoint')
+#     parser.add_argument('--noval', action='store_true', help='only validate final epoch')
+#     parser.add_argument('--noautoanchor', action='store_true', help='disable AutoAnchor')
+#     parser.add_argument('--evolve', type=int, nargs='?', const=300, help='evolve hyperparameters for x generations')
+#     parser.add_argument('--bucket', type=str, default='', help='gsutil bucket')
+#     parser.add_argument('--cache', type=str, nargs='?', const='ram', help='--cache images in "ram" (default) or "disk"')
+#     parser.add_argument('--image-weights', action='store_true', help='use weighted image selection for training')
+#     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+#     parser.add_argument('--multi-scale', action='store_true', help='vary img-size +/- 50%%')
+#     parser.add_argument('--single-cls', action='store_true', help='train multi-class data as single-class')
+#     parser.add_argument('--optimizer', type=str, choices=['SGD', 'Adam', 'AdamW'], default='SGD', help='optimizer')
+#     parser.add_argument('--sync-bn', action='store_true', help='use SyncBatchNorm, only available in DDP mode')
+#     parser.add_argument('--workers', type=int, default=8, help='max dataloader workers (per RANK in DDP mode)')
+#     parser.add_argument('--project', default=ROOT / 'runs/train', help='save to project/name')
+#     parser.add_argument('--name', default='exp', help='save to project/name')
+#     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
+#     parser.add_argument('--quad', action='store_true', help='quad dataloader')
+#     parser.add_argument('--cos-lr', action='store_true', help='cosine LR scheduler')
+#     parser.add_argument('--label-smoothing', type=float, default=0.0, help='Label smoothing epsilon')
+#     parser.add_argument('--patience', type=int, default=100, help='EarlyStopping patience (epochs without improvement)')
+#     parser.add_argument('--freeze', nargs='+', type=int, default=[0], help='Freeze layers: backbone=10, first3=0 1 2')
+#     parser.add_argument('--save-period', type=int, default=-1, help='Save checkpoint every x epochs (disabled if < 1)')
+#     parser.add_argument('--local_rank', type=int, default=-1, help='DDP parameter, do not modify')
 
-    # Weights & Biases arguments
-    parser.add_argument('--entity', default=None, help='W&B: Entity')
-    parser.add_argument('--upload_dataset', nargs='?', const=True, default=False, help='W&B: Upload data, "val" option')
-    parser.add_argument('--bbox_interval', type=int, default=-1, help='W&B: Set bounding-box image logging interval')
-    parser.add_argument('--artifact_alias', type=str, default='latest', help='W&B: Version of dataset artifact to use')
+#     # Weights & Biases arguments
+#     parser.add_argument('--entity', default=None, help='W&B: Entity')
+#     parser.add_argument('--upload_dataset', nargs='?', const=True, default=False, help='W&B: Upload data, "val" option')
+#     parser.add_argument('--bbox_interval', type=int, default=-1, help='W&B: Set bounding-box image logging interval')
+#     parser.add_argument('--artifact_alias', type=str, default='latest', help='W&B: Version of dataset artifact to use')
 
-    opt = parser.parse_known_args()[0] if known else parser.parse_args()
-    return opt
+#     opt = parser.parse_known_args()[0] if known else parser.parse_args()
+#     return opt
 
-
-def main(opt, callbacks=Callbacks()):
+@hydra.main(config_path="configs", config_name="config.yaml")
+def main(opt: DictConfig, callbacks=Callbacks()):
     # Checks
     if RANK in [-1, 0]:
+        #print_args(FILE.stem, opt)
         print_args(FILE.stem, opt)
         check_git_status()
         check_requirements(exclude=['thop'])
@@ -639,5 +647,6 @@ def run(**kwargs):
 
 
 if __name__ == "__main__":
-    opt = parse_opt()
-    main(opt)
+    #opt = parse_opt()
+    #main(opt)
+    main()

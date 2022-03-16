@@ -9,6 +9,8 @@ from typing import Dict
 
 import yaml
 from tqdm import tqdm
+import datetime
+from datetime import datetime
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[3]  # YOLOv5 root directory
@@ -156,14 +158,19 @@ class WandbLogger():
                                             allow_val_change=True)
                 opt.resume = model_artifact_name
         elif self.wandb:
+           # print("disabled" if opt.debug else "online")
+           # exit()
+            name = datetime.now().strftime("%b%d_%H:%M:%S") + f"_{opt.run_name}" if opt.run_name is not None else ""
             self.wandb_run = wandb.init(config=opt,
                                         resume="allow",
                                         project='YOLOv5' if opt.project == 'runs/train' else Path(opt.project).stem,
                                         entity=opt.entity,
-                                        name=opt.name if opt.name != 'exp' else None,
+                                        #name=opt.name if opt.name != 'exp' else None,
+                                        name=name,
                                         job_type=job_type,
                                         id=run_id,
-                                        allow_val_change=True) if not wandb.run else wandb.run
+                                        allow_val_change=True,
+                                        mode="disabled" if opt.debug else "online") if not wandb.run else wandb.run
         if self.wandb_run:
             if self.job_type == 'Training':
                 if opt.upload_dataset:

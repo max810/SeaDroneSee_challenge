@@ -43,11 +43,8 @@ class Loggers():
         self.hyp = hyp
         self.logger = logger  # for printing results to console
         self.include = include
-        self.keys = ['train/box_loss', 'train/obj_loss', 'train/cls_loss',  # train loss
-                     'metrics/precision', 'metrics/recall', 'metrics/mAP_0.5', 'metrics/mAP_0.5:0.95',  # metrics
-                     'val/box_loss', 'val/obj_loss', 'val/cls_loss',  # val loss
-                     'x/lr0', 'x/lr1', 'x/lr2']  # params
-        self.best_keys = ['best/epoch', 'best/precision', 'best/recall', 'best/mAP_0.5', 'best/mAP_0.5:0.95',]
+
+        self.best_keys = ['best/epoch', 'best/precision', 'best/recall', 'best/mAP_0.5', 'best/mAP_0.5:0.95', 'best/mIoU']
         for k in LOGGERS:
             setattr(self, k, None)  # init empty logger dictionary
         self.csv = True  # always log to csv
@@ -111,26 +108,27 @@ class Loggers():
             files = sorted(self.save_dir.glob('val*.jpg'))
             self.wandb.log({"Validation": [wandb.Image(str(f), caption=f.name) for f in files]})
 
-    def on_fit_epoch_end(self, vals, epoch, best_fitness, fi):
+    def on_fit_epoch_end(self, metrics_dict, epoch, best_fitness, fi):
         # Callback runs at the end of each fit (train+val) epoch
-        x = {k: v for k, v in zip(self.keys, vals)}  # dict
+        filename_keys = [k for k in metrics_dict.keys() if 'class' not in k]
+        best_metrics_names = ['metrics/' + k.removeprefix('best/') for k in self.best_keys]
         if self.csv:
             file = self.save_dir / 'results.csv'
-            n = len(x) + 1  # number of cols
-            s = '' if file.exists() else (('%20s,' * n % tuple(['epoch'] + self.keys)).rstrip(',') + '\n')  # add header
+            n = len(filename_keys) + 1  # number of cols
+            s = '' if file.exists() else (('%20s,' * n % tuple(['epoch'] + filename_keys)).rstrip(',') + '\n')  # add header
             with open(file, 'a') as f:
-                f.write(s + ('%20.5g,' * n % tuple([epoch] + vals)).rstrip(',') + '\n')
+                f.write(s + ('%20.5g,' * n % tuple([epoch] + [metrics_dict[k] for k in filename_keys])).rstrip(',') + '\n')
 
         if self.tb:
-            for k, v in x.items():
+            for k, v in metrics_dict.items():
                 self.tb.add_scalar(k, v, epoch)
 
         if self.wandb:
             if best_fitness == fi:
-                best_results = [epoch] + vals[3:7]
+                best_results = [epoch] + [metrics_dict[k] for k in best_metrics_names]
                 for i, name in enumerate(self.best_keys):
                     self.wandb.wandb_run.summary[name] = best_results[i]  # log best results in the summary
-            self.wandb.log(x)
+            self.wandb.log(metrics_dict)
             self.wandb.end_epoch(best_result=best_fitness == fi)
 
     def on_model_save(self, last, epoch, final_epoch, best_fitness, fi):
@@ -139,7 +137,7 @@ class Loggers():
             if ((epoch + 1) % self.opt.save_period == 0 and not final_epoch) and self.opt.save_period != -1:
                 self.wandb.log_model(last.parent, self.opt, epoch, fi, best_model=best_fitness == fi)
 
-    def on_train_end(self, last, best, plots, epoch, results):
+    def on_train_end(self, last, best, plots, epoch, metrics_dict):
         # Callback runs on training end
         if plots:
             plot_results(file=self.save_dir / 'results.csv')  # save results.png
@@ -152,7 +150,7 @@ class Loggers():
                 self.tb.add_image(f.stem, cv2.imread(str(f))[..., ::-1], epoch, dataformats='HWC')
 
         if self.wandb:
-            self.wandb.log({k: v for k, v in zip(self.keys[3:10], results)})  # log best.pt val results
+            self.wandb.log({k: v for k, v in metrics_dict if 'metrics/' in k})  # log best.pt val results
             self.wandb.log({"Results": [wandb.Image(str(f), caption=f.name) for f in files]})
             # Calling wandb.log. TODO: Refactor this into WandbLogger.log_model
             if not self.opt.evolve:
