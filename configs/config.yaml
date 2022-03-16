@@ -13,7 +13,7 @@ noval: false
 noautoanchor: false
 evolve: null # ??? probably should put 300 
 bucket: ""
-cache: null # ??? probably should put "ram"
+cache: ram # ??? probably should put "ram"
 image_weights: false
 device: ""
 multi_scale: false
