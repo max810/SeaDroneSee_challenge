@@ -337,7 +337,7 @@ def run(data,
         
     metrics_dict = {
         'metrics/precision': mp,
-        'metrics/recall': mp,
+        'metrics/recall': mr,
         'metrics/mAP_0.5': map50,
         'metrics/mAP_0.5:0.95': map,
         'metrics/mIoU': mIoU,
