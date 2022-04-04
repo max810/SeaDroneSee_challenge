@@ -111,7 +111,8 @@ class Loggers():
     def on_fit_epoch_end(self, metrics_dict, epoch, best_fitness, fi):
         # Callback runs at the end of each fit (train+val) epoch
         filename_keys = [k for k in metrics_dict.keys() if 'class' not in k]
-        best_metrics_names = ['metrics/' + k.removeprefix('best/') for k in self.best_keys[1:]]  # don't include "metrics/epoch", it's separate
+        # best_metrics_names = ['metrics/' + k.removeprefix('best/') for k in self.best_keys[1:]]  # don't include "metrics/epoch", it's separate
+        best_metrics_names = ['metrics/' + k[5:] for k in self.best_keys[1:]]  # don't include "metrics/epoch", it's separate
         if self.csv:
             file = self.save_dir / 'results.csv'
             n = len(filename_keys) + 1  # number of cols

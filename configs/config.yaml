@@ -1,11 +1,11 @@
-weights: yolov5s.pt
+weights: yolov5l.pt
 cfg: ""
 data: "SeaDroneSee.yaml"
 hyp: 'data/hyps/hyp.scratch-low.yaml'
 save_dir: null
-epochs: 30
-batch_size: 16
-imgsz: 640
+epochs: 80
+batch_size: 8
+imgsz: 768
 rect: false
 resume: false
 nosave: false
