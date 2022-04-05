@@ -1,5 +1,0 @@
-train: ../datasets/SeaDroneSee/train/images
-val: ../datasets/SeaDroneSee/val/images
-
-nc: 6
-names: ['swimmer', 'floater', 'boat', 'swimmer_on_boat', 'floater_on_boat', 'life_jacket']
