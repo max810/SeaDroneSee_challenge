@@ -247,7 +247,12 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
     no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
 
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
-    for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):  # from, number, module, args
+    
+    modules_list = d['backbone'] + d['head']
+    if d.get('stem') is not None:
+        modules_list = d['stem'] + modules_list
+        
+    for i, (f, n, m, args) in enumerate(modules_list):  # from, number, module, args
         m = eval(m) if isinstance(m, str) else m  # eval strings
         for j, a in enumerate(args):
             try:
