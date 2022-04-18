@@ -158,8 +158,6 @@ class WandbLogger():
                                             allow_val_change=True)
                 opt.resume = model_artifact_name
         elif self.wandb:
-           # print("disabled" if opt.debug else "online")
-           # exit()
             name = datetime.now().strftime("%b%d_%H:%M:%S") + f"_{opt.run_name}" if opt.run_name is not None else ""
             self.wandb_run = wandb.init(config=opt,
                                         resume="allow",
