@@ -425,7 +425,7 @@ def main(opt):
             LOGGER.info(f'WARNING: confidence threshold {opt.conf_thres} >> 0.001 will produce invalid mAP values.')
         name = datetime.now().strftime("%b%d_%H:%M:%S") + f"_{opt.run_name}" if opt.run_name is not None else ""
         wandb.init(
-            project='YOLOv5' if opt.project == 'runs/val' else Path(opt.project).stem,
+            project='YOLOv5',
             entity=opt.entity,
             mode='disabled' if opt.debug else 'online',
             name=name,
