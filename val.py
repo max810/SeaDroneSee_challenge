@@ -430,6 +430,7 @@ def main(opt):
             mode='disabled' if opt.debug else 'online',
             name=name,
             config=opt,
+            group='VAL',
         )
         args = vars(opt)
         del args['entity']
