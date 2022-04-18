@@ -405,7 +405,7 @@ def parse_opt():
     parser.add_argument('--dnn', action='store_true', help='use OpenCV DNN for ONNX inference')
     
         # Weights & Biases arguments
-    parser.add_argument('--entity', default=None, help='W&B: Entity')
+    parser.add_argument('--entity', default='cyr1ll', help='W&B: Entity')
     parser.add_argument('--run_name', type=str, default='baseline', help='Additional suffix to the run name in W&B')
     parser.add_argument('--debug', action='store_true', help='debug run')
     
