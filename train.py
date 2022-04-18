@@ -449,7 +449,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                     if is_coco:
                         callbacks.run('on_fit_epoch_end', metrics_dict, epoch, best_fitness, fi)
 
-        callbacks.run('on_train_end', last, best, plots, epoch, results)
+        callbacks.run('on_train_end', last, best, plots, epoch, metrics_dict)
         LOGGER.info(f"Results saved to {colorstr('bold', save_dir)}")
 
     torch.cuda.empty_cache()
