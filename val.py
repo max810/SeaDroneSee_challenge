@@ -24,10 +24,12 @@ import os
 import sys
 from pathlib import Path
 from threading import Thread
+from datetime import datetime
 
 import numpy as np
 import torch
 from tqdm import tqdm
+import wandb
 
 from utils import metrics
 
@@ -42,7 +44,7 @@ from utils.callbacks import Callbacks
 from utils.datasets import create_dataloader
 from utils.general import (LOGGER, box_iou, check_dataset, check_img_size, check_requirements, check_yaml,
                            coco80_to_coco91_class, colorstr, increment_path, non_max_suppression, print_args,
-                           scale_coords, xywh2xyxy, xyxy2xywh)
+                           scale_coords, xywh2xyxy, xyxy2xywh, box_how_much_inside)
 from utils.metrics import ConfusionMatrix, ap_per_class
 from utils.plots import output_to_target, plot_images, plot_val_study
 from utils.torch_utils import select_device, time_sync
@@ -81,12 +83,33 @@ def process_batch(detections, labels, iouv):
     """
     correct = torch.zeros(detections.shape[0], iouv.shape[0], dtype=torch.bool, device=iouv.device)
     iou = box_iou(labels[:, 1:], detections[:, :4])  # [num_gt x num_preds] (all_gt vs all_preds)
-    iou_scores = torch.zeros(len(detections), dtype=torch.float32, device='cpu')
-    # for each gt get a matching pred_box with maximum IoU
-    best_ious, best_boxes_indices = torch.max(iou, dim=1)
-    iou_scores[best_boxes_indices] = best_ious.cpu()
+    
+    confident_detections = [d for d in detections if d[4] > 0.25]
+    if len(confident_detections):
+        confident_detections = torch.stack(confident_detections)
+        confident_ious = box_iou(labels[:, 1:], confident_detections[:, :4])
+        iou_scores = torch.zeros(len(confident_detections), dtype=torch.float32, device='cpu')
+        # for each gt get a matching pred_box with maximum IoU
+        best_ious, best_boxes_indices = torch.max(confident_ious, dim=1)
+        iou_scores[best_boxes_indices] = best_ious.cpu()
+    else:
+        iou_scores = torch.tensor([])
     # for rest of pred boxes -> IoU = 0
     
+    # Every box with every box (Intersection over box1)
+    boxes_inside = box_how_much_inside(detections[:, :4], detections[:, :4])
+    # n = 0
+    for i in range(len(boxes_inside)):
+        if detections[i, 5] in (0, 1) and detections[i, 4] > 0.25:  # if class is (swimmer, floater)
+            for j in range(i + 1, len(boxes_inside[i])):
+                if detections[j, 5] == 2 and detections[j, 4] > 0.25 and boxes_inside[i, j] > 0.75:  # if there is a boat in the same spot
+                    # n += 1
+                    detections[i, 5] += 3  # class becomes <class>_on_boat
+                    break
+            
+    # print(f"Switched {n}/{len(detections)} predictions for ON BOAT")
+    # classes: ['swimmer', 'floater', 'boat', ...]
+    # if det['class'] in (0, 1) and det.intersection(det2)/det >= 0.75 and det2['class'] == 2 -> det['class'] += 3 (0, 1) -> (3, 4)
 
     x = torch.where((iou >= iouv[0]) & (labels[:, 0:1] == detections[:, 5]))  # IoU above threshold and classes match
     if x[0].shape[0]:
@@ -98,6 +121,9 @@ def process_batch(detections, labels, iouv):
             matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
         matches = torch.Tensor(matches).to(iouv.device)
         correct[matches[:, 1].long()] = matches[:, 2:3] >= iouv
+    
+    # conf filtering
+    # iou_scores_filtered = [score for i, score in enumerate(iou_scores) if detections[i, 4 > 0.25]
     return correct, iou_scores
 
 
@@ -356,10 +382,10 @@ def run(data,
 
 def parse_opt():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data', type=str, default=ROOT / 'data/coco128.yaml', help='dataset.yaml path')
-    parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'yolov5s.pt', help='model.pt path(s)')
-    parser.add_argument('--batch-size', type=int, default=32, help='batch size')
-    parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=640, help='inference size (pixels)')
+    parser.add_argument('--data', type=str, default=ROOT / 'data/SeaDroneSee.yaml', help='dataset.yaml path'),
+    parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'yolov5l.pt', help='model.pt path(s)')
+    parser.add_argument('--batch-size', type=int, default=8, help='batch size')
+    parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=768, help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float, default=0.001, help='confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.6, help='NMS IoU threshold')
     parser.add_argument('--task', default='val', help='train, val, test, speed or study')
@@ -377,6 +403,12 @@ def parse_opt():
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--half', action='store_true', help='use FP16 half-precision inference')
     parser.add_argument('--dnn', action='store_true', help='use OpenCV DNN for ONNX inference')
+    
+        # Weights & Biases arguments
+    parser.add_argument('--entity', default='cyr1ll', help='W&B: Entity')
+    parser.add_argument('--run_name', type=str, default='baseline', help='Additional suffix to the run name in W&B')
+    parser.add_argument('--debug', action='store_true', help='debug run')
+    
     opt = parser.parse_args()
     opt.data = check_yaml(opt.data)  # check YAML
     opt.save_json |= opt.data.endswith('coco.yaml')
@@ -391,8 +423,24 @@ def main(opt):
     if opt.task in ('train', 'val', 'test'):  # run normally
         if opt.conf_thres > 0.001:  # https://github.com/ultralytics/yolov5/issues/1466
             LOGGER.info(f'WARNING: confidence threshold {opt.conf_thres} >> 0.001 will produce invalid mAP values.')
-        run(**vars(opt))
-
+        name = datetime.now().strftime("%b%d_%H:%M:%S") + f"_{opt.run_name}" if opt.run_name is not None else ""
+        wandb.init(
+            project='YOLOv5',
+            entity=opt.entity,
+            mode='disabled' if opt.debug else 'online',
+            name=name,
+            config=opt,
+        )
+        args = vars(opt)
+        del args['entity']
+        del args['run_name']
+        del args['debug']
+        
+        *_, metrics_dict = run(**args)
+        for k in metrics_dict:
+            if 'class' not in k:
+                print(f"{k}: {metrics_dict[k]}")
+        wandb.log(metrics_dict)
     else:
         weights = opt.weights if isinstance(opt.weights, list) else [opt.weights]
         opt.half = True  # FP16 for fastest results
