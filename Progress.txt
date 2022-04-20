@@ -52,3 +52,13 @@ python detect.py --source 0  # webcam
 
 
 
+TRIALS
+
+Added new prediction head 
+Question how to pretrain the model?
+
+
+python train.py --cfg models/yolov5l-focus.yaml --name v5l-focus --run_name focus
+python train.py --cfg models/yolov5l-removed-head.yaml --name v5l-removed-head --run_name removed-head
+python val.py --weights ./runs/train/v5l-extra-head/weights/best.pt --data ../datasets/SeaDroneSee/SeaDroneSee.yaml --img 768 --iou 0.65 --half --batch-size 8 --name 
+python train.py --cfg models/yolov5l-TR.yaml --name v5l-TR --run_name TR
