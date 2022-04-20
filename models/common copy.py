@@ -719,7 +719,7 @@ class ColorAttentionModule(nn.Module):
         super(ColorAttentionModule, self).__init__()
 
     def forward(self, x):
-        #print(x)
+        print(x)
         return x
 
 class CBAM(nn.Module):
@@ -730,7 +730,7 @@ class CBAM(nn.Module):
 
     def forward(self, x):
         out = self.channel_attention(x) * x
-        #print(self.channel_attention(x).size())
+        print(self.channel_attention(x).size())
         out = self.spatial_attention(out) * out
         return out
 
