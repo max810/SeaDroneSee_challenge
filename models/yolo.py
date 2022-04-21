@@ -23,6 +23,7 @@ from utils.autoanchor import check_anchor_order
 from utils.general import LOGGER, check_version, check_yaml, make_divisible, print_args
 from utils.plots import feature_visualization
 from utils.torch_utils import fuse_conv_and_bn, initialize_weights, model_info, scale_img, select_device, time_sync
+from .yolo_projector import *
 
 try:
     import thop  # for FLOPs computation
@@ -82,7 +83,7 @@ class Detect(nn.Module):
 
 
 class Model(nn.Module):
-    def __init__(self, cfg='yolov5s.yaml', ch=3, nc=None, anchors=None):  # model, input channels, number of classes
+    def __init__(self, cfg='yolov5s.yaml', ch=3, nc=None, anchors=None, projector=None):  # model, input channels, number of classes
         super().__init__()
         if isinstance(cfg, dict):
             self.yaml = cfg  # model dict
@@ -103,6 +104,15 @@ class Model(nn.Module):
         self.model, self.save = parse_model(deepcopy(self.yaml), ch=[ch])  # model, savelist
         self.names = [str(i) for i in range(self.yaml['nc'])]  # default names
         self.inplace = self.yaml.get('inplace', True)
+
+        if projector is None:
+            print("NO PROJECTOR, USING IDENTITY")
+            self.projector = nn.Identity()
+        else:
+            print(f"USING {projector} PROJECTOR")
+            klass = globals()[projector]
+            instance = klass()
+            self.projector = ProjectorWrapper(instance)
 
         # Build strides, anchors
         m = self.model[-1]  # Detect()
@@ -140,6 +150,8 @@ class Model(nn.Module):
         return torch.cat(y, 1), None  # augmented inference, train
 
     def _forward_once(self, x, profile=False, visualize=False):
+        x = self.projector(x)
+        
         y, dt = [], []  # outputs
         for m in self.model:
             if m.f != -1:  # if not from previous layer
